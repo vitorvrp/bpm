@@ -10,7 +10,7 @@ url("./icons.woff?efbb50b878a8a64b05d184c8609df48b") format("woff");
     font-weight: normal !important;
     font-variant: normal;
     text-transform: none;
-    line-height: 1;
+    line-height: 0.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
