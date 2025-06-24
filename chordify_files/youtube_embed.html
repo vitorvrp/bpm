@@ -1,174 +1,99 @@
 <!DOCTYPE html>
-<!-- saved from url=(0062)https://4er56ty7u.fastwebcloud.net/youtube_embed.html?20231023 -->
-<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
-	<style>
-			body { margin: 0; width:100%; height:100%;  background-color:#000000; }
-			html { width:100%; height:100%; background-color:#000000; }
-			.embed-container iframe,
-			.embed-container object,
-			.embed-container embed {
-				position: absolute;
-				top: 0;
-				left: 0;
-				bottom: 0;
-				right: 0;
-				width: 100% !important;
-				height: 100% !important;
-			}
-	</style>
+<html>
+<head>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background-color: black;
+    }
+  </style>
+  
 </head>
 <body>
-		<div class="embed-container">
-			<iframe id="player" frameborder="0" allowfullscreen="" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" title="Jorge &amp; Mateus - Se o Amor Tiver Lugar (Lyric Video Oficial)" width="2560" height="1400" src="./hT_nvWreIhg.html"></iframe>
-		</div>
+  <div class="embed-container">
+    <div id="player">Simulated YouTube Player</div>
+  </div>
 
-		<script type="text/javascript" id="www-widgetapi-script" src="./www-widgetapi.js.download" async=""></script><script defer="" src="./iframe_api" onerror="onYouTubeIframeAPIFailedToLoad()"></script>
+  <script>
+    let fakeTime = 0;
+    let playing = false;
+    let speed = 1;
+    let interval = null;
 
-		<script>
-			// For GDPR
-			var useNocookie = window.location.href.indexOf('nocookie=1') > -1
-			var player;
-			var error = false;
+    function sendMessage(msg) {
+      window.parent.postMessage(msg, '*');
+    }
 
-			function onYouTubeIframeAPIFailedToLoad(){
-				console.error('Error: YouTube Api failed to load')
-			}
+    function simulatePlayback() {
+      if (interval) clearInterval(interval);
+      interval = setInterval(() => {
+        if (playing) {
+          fakeTime += 0.02 * speed;
+          sendMessage({ cmd: 'setCurrentTime', parms: [fakeTime] });
+		  
+        }
+      }, 20);
+    }
 
-			function onPlayerReady(event) {
-    player.mute();  // Mute para permitir autoplay em alguns navegadores
-    player.playVideo();
-    sendMessage({cmd: 'onReady', parms: []});
-    window.setInterval(getCurrentTime, 20);
-}
+    function onPlayerReady() {
+      sendMessage({ cmd: 'onReady', parms: [] });
+      simulatePlayback();
+    }
 
-			function onPlayerStateChange(event) {
-				if (!error) {
-					sendMessage({cmd: 'onStateChange', parms: [event.data]});
-				} else {
-					error = false;
-				}
-			}
+    function onPlayerStateChange(state) {
+      sendMessage({ cmd: 'onStateChange', parms: [state] });
+    }
 
-			function onPlayerPlaybackQualityChange(event) {
-			}
+    function onYouTubeIframeAPIReady() {
+      sendMessage({ cmd: 'onYouTubeIframeAPIReady', parms: [] });
+      onPlayerReady();
+    }
 
-			function onPlayerError(event) {
-				const errorCode = parseInt(event.data)
+    // Fake player commands
+    function playVideo() {
+      playing = true;
+      onPlayerStateChange(1); // YT.PlayerState.PLAYING
+    }
 
-				if(isNaN(errorCode)) {
-					console.error('Unexpected Youtube player error event: ', event)
-					error = true
-					return
-				}
+    function pauseVideo() {
+      playing = false;
+      onPlayerStateChange(2); // YT.PlayerState.PAUSED
+    }
 
-				if (errorCode == 100 || errorCode == 150) {
-					error = true;
-				}
+    function seekTo(time) {
+      fakeTime = time;
+    }
 
-				sendMessage({cmd: 'onError', parms: [errorCode]});
-			}
+    function mute() {}
+    function unMute() {}
+    function setVolume(volume) {}
+    function setPlaybackRate(rate) {
+      speed = rate;
+      sendMessage({ cmd: 'setCurrentSpeed', parms: [rate] });
+    }
 
-			function onPlayerPlaybackRateChange(event) {
-				var newSpeed = event.data;
-				sendMessage({cmd: 'setCurrentSpeed', parms: [newSpeed]});
-			}
+    // Simular redimensionamento
+    window.onresize = function () {
+      // nada necessário aqui, sem player real
+    };
 
-			function onYouTubeIframeAPIReady() {
-				sendMessage({cmd: 'onYouTubeIframeAPIReady', parms: []});
-			}
+    // Receber comandos do site pai
+    window.addEventListener('message', function (e) {
+  if (e.origin === 'https://www.youtube.com') return;
+  const cmd = e?.data?.cmd;
+  if (typeof window[cmd] === "function") {
+    const parms = e.data.parms || [];
+    window[cmd](...parms);
+  }
+});
 
-			function initPlayer(params) {
-				var playerOptions = {
-					"videoId": params.videoId,
-					'height': '100%',
-					'width': '100%',
-					"host": useNocookie ? "https://www.youtube-nocookie.com" : "https://www.youtube.com",
-					"playerVars": {
-						"playsinline": 1,
-						"host": "https://www.youtube.com",
-						"origin": "https://www.youtube.com",
-						"controls": params.config && params.config.controls ? 1 : 0,
-						"modestbranding": 1,
-						"showinfo": 0,
-						"rel": 0,
-						"theme": "light",
-						"iv_load_policy": 3,
-						"fs": 0,
-						"enablejsapi": 1,
-						"autoplay": 1
-					},
-					"events": {
-						"onReady": onPlayerReady,
-						"onError": onPlayerError,
-						"onStateChange": onPlayerStateChange,
-						"onPlaybackQualityChange": onPlayerPlaybackQualityChange,
-						"onPlaybackRateChange": onPlayerPlaybackRateChange
-					}
-				}
-				player = new YT.Player('player', playerOptions);
-				player.setSize(window.outerWidth, window.outerHeight);
-				window.yt = player;
-			}
-
-			function getCurrentTime() {
-				var state = player.getPlayerState();
-				if (state == YT.PlayerState.PLAYING) {
-					time = player.getCurrentTime()
-					sendMessage({cmd: 'setCurrentTime', parms: [time] });
-				}
-			}
-
-			function playVideo(){
-				yt.playVideo();
-			}
-
-			function seekTo(time){
-				yt.seekTo(time);
-			}
-
-			function pauseVideo(){
-				yt.pauseVideo();
-			}
-
-			function mute(){
-				yt.mute();
-			}
-
-			function unMute(){
-				yt.unMute();
-			}
-
-			function setVolume(volume){
-				yt.setVolume(volume);
-			}
-
-			function setPlaybackRate(parm){
-				yt.setPlaybackRate(parm);
-			}
-
-			window.onresize = function() {
-				if (typeof player !== 'undefined') {
-					player.setSize(window.outerWidth, window.outerHeight);
-				}
-			}
-
-			window.addEventListener('message', function(e){
-				if( e.origin == 'https://www.youtube.com' ){
-					return;
-				}
-				if( window[e.data.cmd] !== undefined ){
-					if( e.data.parms !== undefined && e.data.parms[0] !== undefined ){
-						window[e.data.cmd](e.data.parms[0]);
-					} else {
-						window[e.data.cmd]();
-					}
-				}
-			});
-
-			window.sendMessage = function(msg){
-				window.parent.postMessage(msg, '*');
-			}
-		</script>
+    // Chamar API Ready manualmente
+    onYouTubeIframeAPIReady();
+	
+  </script>
 
 
-</body></html>
+</body>
+</html>
