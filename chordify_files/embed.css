@@ -57,6 +57,7 @@ body {
 	height: 200px !important;
 	width: 200px !important;
 	background: #333333;
+	visibility: hidden;
 }
 #title {
 	position: absolute;
@@ -89,9 +90,11 @@ body {
 	padding: 0;
 }
 #viewOptions {
-	background:white;
-	color: #333333;
-	padding:0 6px;
+    background: white;
+    color: #333333;
+    padding: 0 6px;
+    margin-left: 710px;
+    position: fixed;
 }
 h1, h1 a {
 	font-size: 12pt;
@@ -138,7 +141,7 @@ footer a {
 	text-decoration: none;
 }
 #controls {
-	position: fixed;
+	position: unset;
 	z-index: 1;
 	bottom: 0;
 	right: 0;
@@ -161,7 +164,7 @@ button {
 	background: transparent;
 }
 #controls button {
-	color: white;
+	color: red;
 	text-transform: lowercase;
 }
 #controls button.button-diagrams {
@@ -175,9 +178,17 @@ button {
 }
 #controls .icon-caret-right,
 #controls .icon-pause {
-	font-size: 56pt;
-	height: 76px;
-	vertical-align: middle;
+	font-size: 50pt;
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 76px;
+    vertical-align: middle;
+    top: 0px;
+    left: 652px;
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+    height: 76px;
 }
 .chord-label, .bass-label {
 	font-family: 'ChordFont';
