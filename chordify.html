@@ -9,7 +9,13 @@
 <link rel="stylesheet" href="./chordify_files/embed.css">
 
 <!--<script>window.loadUrl = 'https://chordify.net/api/v2/songs/youtube:hT_nvWreIhg/chords?vocabulary=extended_inversions'; window.embedHost = 'https://4er56ty7u.fastwebcloud.net';</script>-->
-<script>window.loadUrl = 'https://vitorvrp.github.io/js/a.txt'; window.embedHost = 'https://4er56ty7u.fastwebcloud.net';</script>
+<script>
+  // Define embedHost com base na URL atual (100% automático)
+  const basePath = window.location.href.substring(0, window.location.href.lastIndexOf("/"));
+  window.embedHost = basePath;
+</script>
+
+
 
 
 <script>
@@ -926,25 +932,18 @@ window.googlefc.callbackQueue = window.googlefc.callbackQueue || [];
 <body class="embedpage" style="background-color: rgb(210, 200, 194);">
 
 <div id="top">
-	<header>
-		<button class="icon-info"></button>
-		<h1>
-			<a target="_blank" href="https://chordify.net/chords/jorge-mateus-se-o-amor-tiver-lugar-lyric-video-oficial-jorge-e-mateus-oficial?utm_medium=embed">
-				<b>Play along with:</b> Jorge &amp; Mateus - Se o Amor Tiver Lugar (Lyric Video Oficial)
-			</a>
-		</h1>
-	</header>
+	
 
 	<div id="viewOptions">
 		<div class="instruments">
-			<button name="guitar" class="active">violão</button>
-			<button name="ukulele">uquelele</button>
-			<button name="piano">piano</button>
-			<button name="mandolin">Bandolim</button>
+	
+			
 		</div>
 		<div id="viewToggle">
 			<button name="chords" class="active">Acordes</button>
 			<button name="diagrams" class="">diagramas</button>
+		
+			
 		</div>
 
 	</div>
@@ -966,9 +965,7 @@ window.googlefc.callbackQueue = window.googlefc.callbackQueue || [];
 		<ul class="controls">
 			<li class="play"><button name="play" class="button-play disabled"><span class="icon-caret-right"></span></button></li>
 		</ul>
-		<footer>
-			<a href="https://chordify.net/?utm_medium=embed" target="_blank">Chords by <span class="logo icon-logo"></span></a>
-		</footer>
+		
 	</div>
 </div>
 
@@ -988,6 +985,8 @@ window.googlefc.callbackQueue = window.googlefc.callbackQueue || [];
 	<br><br>
 	<a href="https://chordify.net/chords/jorge-mateus-se-o-amor-tiver-lugar-lyric-video-oficial-jorge-e-mateus-oficial?utm_medium=embed">Or open in Chordify</a>
 </div>
+
+
 
 <script>
 
@@ -1027,6 +1026,7 @@ window.googlefc.callbackQueue = window.googlefc.callbackQueue || [];
 	});
 
 </script>
+
 
 
 
