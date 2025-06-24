@@ -2216,30 +2216,18 @@ return window.document.addEventListener("ChordifyLibrary", t),
             }
             initialize = () => {
                 window.addEventListener("message", (e => {
-                    if (!("string" == typeof e.data.source && e.data.source.indexOf("react-") > -1) && e.origin === window.embedHost) {
-                        const {cmd: t, parms: r} = e.data;
-                        switch (t) {
-                        case "onReady":
-                            this.onReady();
-                            break;
-                        case "onError":
-                            this.onError(r[0]);
-                            break;
-                        case "onStateChange":
-                            this.onStateChange(r[0]);
-                            break;
-                        case "onYouTubeIframeAPIReady":
-                            this.onYouTubeIframeAPIReady();
-                            break;
-                        case "setCurrentTime":
-                            this.setCurrentTime(r[0]);
-                            break;
-                        case "setCurrentSpeed":
-                            this.setCurrentSpeed(r[0])
-                        }
-                    }
-                }
-                ));
+    if (!("string" == typeof e.data.source && e.data.source.indexOf("react-") > -1) && true) {
+        const {cmd: t, parms: r} = e.data;
+        switch (t) {
+            case "onReady": this.onReady(); break;
+            case "onError": this.onError(r[0]); break;
+            case "onStateChange": this.onStateChange(r[0]); break;
+            case "onYouTubeIframeAPIReady": this.onYouTubeIframeAPIReady(); break;
+            case "setCurrentTime": this.setCurrentTime(r[0]); break;
+            case "setCurrentSpeed": this.setCurrentSpeed(r[0]); break;
+        }
+    }
+}));
                 const e = this.getEmbedUrl();
                 (0,
                 h.I)("youtube-player", {
@@ -2317,7 +2305,7 @@ return window.document.addEventListener("ChordifyLibrary", t),
             }
             ;
             getEmbedUrl = () => {
-                let e = `${window.embedHost}/youtube_embed.html?20231023`;
+                let e = `${window.embedHost}/chordify_files/youtube_embed.html`;
                 return window.needsConsent && (e += "&nocookie=1"),
                 e
             }
