@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>BPM</title>
+    <meta name="robots" content="noindex,follow">
+    <link rel="stylesheet" href="/embed.css">
+    <style>
+        #controls {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: #222;
+            padding: 10px 15px;
+            border-radius: 8px;
+            color: white;
+            font-family: sans-serif;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 6px 10px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+            border: none;
+            background-color: #444;
+            color: white;
+        }
+        #playBtn {
+            background-color: #28a745;
+        }
+        #bpmInput {
+            width: 60px;
+            text-align: center;
+            font-weight: bold;
+            border-radius: 5px;
+            border: none;
+            padding: 6px 5px;
+            background-color: #333;
+            color: white;
+        }
+        #volumeControl {
+            display: none;
+        }
+        #volumeSlider {
+            -webkit-appearance: none;
+            width: 100px;
+            height: 6px;
+            border-radius: 3px;
+            background: #555;
+            cursor: pointer;
+        }
+        #volumeSlider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #28a745;
+            border: none;
+        }
+        #volumeSlider::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #28a745;
+            border: none;
+        }
+    </style>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+document.body.style.backgroundColor = '#d2c8c2';
+    const groupColors = ['darkblue', 'darkgreen', 'darkred', 'darkorange', 'darkviolet', 'darkcyan'];
+    let groups = [];
+    let currentGroup = new Set();
+    let currentColorIndex = 0;
+
+    let isDragging = false;
+    let dragStart = { x: 0, y: 0 };
+    let selectionBox = null;
+
+    const container = document.getElementById('chords');
+    if (!container) {
+        console.warn('[×] Container #chords não encontrado. O script pode não funcionar corretamente.');
+        return;
+    }
+
+    container.setAttribute('tabindex', '0');
+
+    // === Menu de cores ===
+    const colorPicker = document.createElement('div');
+    colorPicker.style.position = 'fixed';
+    colorPicker.style.top = '50%';
+    colorPicker.style.left = '50%';
+    colorPicker.style.transform = 'translate(-50%, -50%)';
+    colorPicker.style.padding = '10px';
+    colorPicker.style.backgroundColor = '#fff';
+    colorPicker.style.border = '2px solid #0099ff';
+    colorPicker.style.borderRadius = '8px';
+    colorPicker.style.zIndex = '10000';
+    colorPicker.style.display = 'none';
+
+    // NOVO CSS para deixar bem vertical, cores em coluna, sem texto, botões de ação em coluna
+    colorPicker.style.boxShadow = '0 0 10px rgba(0,0,0,0.3)';
+    colorPicker.style.width = '70px';
+    colorPicker.style.display = 'flex';
+    colorPicker.style.flexDirection = 'column';
+    colorPicker.style.alignItems = 'center';
+    colorPicker.style.gap = '10px';
+    colorPicker.style.userSelect = 'none';
+    document.body.appendChild(colorPicker);
+
+    function hideColorPicker() {
+        colorPicker.style.display = 'none';
+    }
+
+    function showColorPicker() {
+        colorPicker.innerHTML = '';
+
+        // botões de cor - só o botão colorido, sem texto
+        groupColors.forEach((color, index) => {
+            const btn = document.createElement('button');
+            btn.style.backgroundColor = color;
+            btn.style.border = 'none';
+            btn.style.margin = '0';
+            btn.style.padding = '12px';
+            btn.style.width = '40px';
+            btn.style.height = '30px';
+            btn.style.cursor = 'pointer';
+            btn.style.borderRadius = '4px';
+            btn.title = `Aplicar cor ${color}`;
+            btn.addEventListener('click', () => {
+                applyColorToCurrentGroup(index);
+                hideColorPicker();
+                container.focus();
+            });
+            colorPicker.appendChild(btn);
+        });
+
+        // Botões de ação com labels curtos e tooltip, em coluna
+        const actions = [
+            {
+                label: 'Fake Chord',
+                title: 'Substituir por Fake Chord (Ctrl+Y)',
+                action: () => {
+                    if (currentGroup.size === 0) {
+                        console.warn('[×] Nenhum elemento selecionado para substituir.');
+                        return;
+                    }
+                    currentGroup.forEach(el => {
+                        const fakeChord = document.createElement('div');
+                        fakeChord.className = 'fake-chord';
+                        el.parentNode.replaceChild(fakeChord, el);
+                    });
+                    currentGroup.clear();
+                    hideColorPicker();
+                    container.focus();
+                }
+            },
+            {
+                label: 'Limpar Seleção',
+                title: 'Limpar seleção (sem remover cor)',
+                action: () => {
+                    currentGroup.forEach(el => el.style.boxShadow = '');
+                    currentGroup.clear();
+                    hideColorPicker();
+                    container.focus();
+                }
+            },
+            {
+                label: 'Limpar Cor',
+                title: 'Remover cor + seleção',
+                action: () => {
+                    currentGroup.forEach(el => {
+                        el.style.outline = '';
+                        el.style.boxShadow = '';
+                    });
+                    currentGroup.clear();
+                    hideColorPicker();
+                    container.focus();
+                }
+            },
+            {
+                label: 'Duplicar',
+                title: 'Duplicar acordes (Ctrl+X)',
+                action: () => {
+                    if (currentGroup.size === 0) {
+                        console.warn('[×] Nenhum elemento selecionado para duplicar.');
+                        return;
+                    }
+                    currentGroup.forEach(el => {
+                        const clone = el.cloneNode(true);
+                        clone.style.outline = '';
+                        clone.style.boxShadow = '';
+                        el.parentNode.insertBefore(clone, el.nextSibling);
+                    });
+                    hideColorPicker();
+                    container.focus();
+                }
+            }
+        ];
+
+        actions.forEach(({label, title, action}) => {
+            const btn = document.createElement('button');
+            btn.textContent = label;
+            btn.title = title;
+            btn.style.backgroundColor = '#444';
+            btn.style.color = 'white';
+            btn.style.border = 'none';
+            btn.style.margin = '0';
+            btn.style.padding = '8px 6px';
+            btn.style.width = '100%';
+            btn.style.cursor = 'pointer';
+            btn.style.borderRadius = '4px';
+            btn.style.fontSize = '13px';
+            btn.addEventListener('click', action);
+            colorPicker.appendChild(btn);
+        });
+
+        colorPicker.style.display = 'flex';
+    }
+
+    document.addEventListener('click', e => {
+        if (colorPicker.style.display === 'flex' && !colorPicker.contains(e.target)) {
+            hideColorPicker();
+        }
+    });
+
+    // Funções para seleção com box-shadow para seleção e outline para cor
+    function highlightSelection(el) {
+        el.style.boxShadow = '0 0 10px 3px red';
+    }
+    function unhighlightSelection(el) {
+        el.style.boxShadow = '';
+    }
+    function highlightElementColor(el, color) {
+        el.style.outline = `4px solid ${color}`;
+    }
+    function unhighlightElementColor(el) {
+        el.style.outline = '';
+    }
+
+    function isSelectableChord(el) {
+        return el.classList && el.classList.contains('chord');
+    }
+
+    function toggleSelection(el, withCtrl = false) {
+        if (!container.contains(el)) return;
+        if (!isSelectableChord(el)) return;
+
+        if (withCtrl) {
+            if (currentGroup.has(el)) {
+                currentGroup.delete(el);
+                unhighlightSelection(el);
+            } else {
+                currentGroup.add(el);
+                highlightSelection(el);
+            }
+        } else {
+            currentGroup.forEach(unhighlightSelection);
+            currentGroup.clear();
+            currentGroup.add(el);
+            highlightSelection(el);
+        }
+    }
+
+    function applyColorToCurrentGroup(colorIndex) {
+        if (currentGroup.size === 0) {
+            console.warn('[×] Nenhum elemento selecionado para colorir.');
+            return;
+        }
+
+        const color = groupColors[colorIndex ?? currentColorIndex];
+        currentGroup.forEach(el => {
+            unhighlightSelection(el);
+            highlightElementColor(el, color);
+        });
+
+        groups.push({ elements: new Set(currentGroup), color });
+        currentGroup.clear();
+
+        currentColorIndex = (colorIndex + 1) % groupColors.length;
+
+        console.log(`[✓] Grupo colorido com "${color}" aplicado e seleção limpa.`);
+    }
+
+    // Função para criar/atualizar/remover caixa de seleção (arraste)
+    function createSelectionBox() {
+        selectionBox = document.createElement('div');
+        selectionBox.style.position = 'fixed';
+        selectionBox.style.border = '2px dashed #0099ff';
+        selectionBox.style.backgroundColor = 'rgba(0, 153, 255, 0.2)';
+        selectionBox.style.pointerEvents = 'none';
+        selectionBox.style.zIndex = '9999';
+        document.body.appendChild(selectionBox);
+    }
+    function updateSelectionBox(x1, y1, x2, y2) {
+        const left = Math.min(x1, x2);
+        const top = Math.min(y1, y2);
+        const width = Math.abs(x2 - x1);
+        const height = Math.abs(y2 - y1);
+        selectionBox.style.left = left + 'px';
+        selectionBox.style.top = top + 'px';
+        selectionBox.style.width = width + 'px';
+        selectionBox.style.height = height + 'px';
+    }
+    function removeSelectionBox() {
+        if (selectionBox) {
+            document.body.removeChild(selectionBox);
+            selectionBox = null;
+        }
+    }
+
+    function isElementInRect(el, rect) {
+        const elRect = el.getBoundingClientRect();
+        return !(
+            elRect.right < rect.left ||
+            elRect.left > rect.right ||
+            elRect.bottom < rect.top ||
+            elRect.top > rect.bottom
+        );
+    }
+
+    document.addEventListener('mousedown', e => {
+        if (e.ctrlKey && e.button === 0 && container.contains(e.target) && isSelectableChord(e.target)) {
+            e.preventDefault();
+            isDragging = true;
+            dragStart.x = e.clientX;
+            dragStart.y = e.clientY;
+            createSelectionBox();
+        }
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!isDragging || !selectionBox) return;
+        e.preventDefault();
+        updateSelectionBox(dragStart.x, dragStart.y, e.clientX, e.clientY);
+        const rect = {
+            left: Math.min(dragStart.x, e.clientX),
+            top: Math.min(dragStart.y, e.clientY),
+            right: Math.max(dragStart.x, e.clientX),
+            bottom: Math.max(dragStart.y, e.clientY)
+        };
+        currentGroup.forEach(unhighlightSelection);
+        currentGroup.clear();
+        const allElements = container.querySelectorAll('.chord');
+        allElements.forEach(el => {
+            if (isElementInRect(el, rect)) {
+                currentGroup.add(el);
+                highlightSelection(el);
+            }
+        });
+    });
+
+    document.addEventListener('mouseup', e => {
+        if (isDragging) {
+            e.preventDefault();
+            isDragging = false;
+            removeSelectionBox();
+            console.log(`[✓] Seleção múltipla finalizada. ${currentGroup.size} elemento(s) selecionado(s).`);
+            container.focus();
+        }
+    });
+
+    document.addEventListener('click', e => {
+        if (e.ctrlKey && container.contains(e.target) && isSelectableChord(e.target)) {
+            e.preventDefault();
+            toggleSelection(e.target, true);
+            container.focus();
+        }
+    });
+
+    container.addEventListener('contextmenu', e => {
+        if (currentGroup.size > 0 && container.contains(e.target)) {
+            e.preventDefault();
+            showColorPicker();
+        }
+    });
+
+    // Atalhos de teclado para ações rápidas
+    document.addEventListener('keydown', e => {
+        if (e.ctrlKey && e.key.toLowerCase() === 'x') {
+            e.preventDefault();
+            if (currentGroup.size === 0) {
+                console.warn('[×] Nenhum elemento selecionado para duplicar.');
+                return;
+            }
+            currentGroup.forEach(el => {
+                const clone = el.cloneNode(true);
+                clone.style.outline = '';
+                clone.style.boxShadow = '';
+                el.parentNode.insertBefore(clone, el.nextSibling);
+                console.log('[✓] Elemento duplicado!', clone);
+            });
+        }
+        if (e.ctrlKey && e.key.toLowerCase() === 'y') {
+            e.preventDefault();
+            if (currentGroup.size === 0) {
+                console.warn('[×] Nenhum elemento selecionado para substituir.');
+                return;
+            }
+            currentGroup.forEach(el => {
+                const fakeChord = document.createElement('div');
+                fakeChord.className = 'fake-chord';
+                el.parentNode.replaceChild(fakeChord, el);
+                console.log('[✓] Elemento substituído por <div class="fake-chord"></div>');
+            });
+            currentGroup.clear();
+            hideColorPicker();
+            container.focus();
+        }
+    });
+
+    function blockAutoScroll() {
+        window.scrollTo = () => console.log('[×] scrollTo bloqueado');
+        window.scrollBy = () => console.log('[×] scrollBy bloqueado');
+
+        const blockScrollTop = el => {
+            let value = 0;
+            Object.defineProperty(el, 'scrollTop', {
+                get: () => value,
+                set: v => {
+                    console.log('[×] scrollTop bloqueado');
+                    value = v;
+                },
+                configurable: true
+            });
+        };
+        blockScrollTop(document.documentElement);
+        blockScrollTop(document.body);
+
+        Element.prototype.scrollIntoView = function() {
+            console.log('[×] scrollIntoView bloqueado');
+        };
+
+        const originalFocus = HTMLElement.prototype.focus;
+        HTMLElement.prototype.focus = function(options) {
+            if (options && typeof options === 'object' && options.preventScroll) {
+                originalFocus.call(this, options);
+            } else {
+                console.log('[×] focus() com scroll bloqueado');
+                originalFocus.call(this, { preventScroll: true });
+            }
+        };
+
+        console.log('[✓] Scroll automático bloqueado de forma avançada (scrollTo, scrollBy, scrollIntoView, focus)');
+    }
+
+    blockAutoScroll();
+
+    function clickButton() {
+        const button = document.querySelector("#viewToggle button");
+
+        if (button) {
+            console.log('Botão #viewToggle encontrado. Clicando...');
+            button.click();
+            return true;
+        }
+        return false;
+    }
+
+    if (!clickButton()) {
+        const observer = new MutationObserver((mutations, obs) => {
+            if (clickButton()) {
+                obs.disconnect();
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    console.log(`Modo ativado:
+- Ctrl + arrastar com mouse esquerdo: seleção múltipla com box-shadow vermelho
+- Ctrl + clique esquerdo: selecionar/deselecionar individualmente (box-shadow vermelho)
+- Botão direito com seleção: menu para aplicar cor (outline), limpar seleção (remove box-shadow), remover cor (remove outline e box-shadow), duplicar
+- Ctrl + X: duplicar seleção
+- Ctrl + Y: substituir por fake chord
+- Scroll automático bloqueado, scroll manual permitido
+`);
+})();
+</script>
+</head>
+<body class="embedpage" style="background-color: rgb(210, 200, 194);">
+<div id="content">
+    <div id="song" class="view-chords">
+        <div id="chordsArea" class="notranslate">
+            <div id="chordsScrollbox" class="chords-scroll">
+                <div id="chords" class="chords chordlang-english barlength-4" tabindex="0"><div class="chord currentChord" data-handle="N" data-i="0"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="1"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="2"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="3"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="4"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="5"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="6"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="7"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="8"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="9"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="10"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="11"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="12"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="13"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="14"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="15"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="16"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="17"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="18"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="19"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="20"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="21"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="22"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="23"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="24"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="25"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="26"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="27"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="28"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="29"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="30"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="31"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="32"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="33"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="34"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="35"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="36"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="37"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="38"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="39"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="40"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="41"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="42"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="43"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="44"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="45"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="46"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="47"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="48"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="49"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="50"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="51"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="52"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="53"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="54"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="55"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="56"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="57"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="58"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="59"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="60"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="61"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="62"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="63"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="64"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="65"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="66"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="67"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="68"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="69"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="70"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="71"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="72"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="73"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="74"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="75"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="76"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="77"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="78"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="79"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="80"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="81"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="82"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="83"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="84"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="85"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="86"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="87"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="88"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="89"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="90"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="91"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="92"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="93"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="94"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="95"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="96"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="97"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="98"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="99"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="100"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="101"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="102"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="103"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="104"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="105"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="106"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="107"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="108"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="109"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="110"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="111"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="112"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="113"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="114"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="115"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="116"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="117"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="118"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="119"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="120"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="121"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="122"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="123"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="124"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="125"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="126"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="127"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="128"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="129"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="130"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="131"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="132"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="133"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="134"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="135"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="136"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="137"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="138"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="139"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="140"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="141"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="142"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="143"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="144"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="145"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="146"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="147"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="148"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="149"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="150"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="151"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="152"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="153"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="154"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="155"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="156"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="157"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="158"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="159"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="160"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="161"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="162"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="163"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="164"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="165"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="166"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="167"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="168"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="169"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="170"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="171"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="172"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="173"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="174"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="175"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="176"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="177"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="178"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="179"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="180"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="181"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="182"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="183"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="184"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="185"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="186"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="187"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="188"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="189"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="190"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="191"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="192"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="193"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="194"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="195"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="196"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="197"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="198"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="199"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="200"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="201"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="202"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="203"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="204"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="205"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="206"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="207"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="208"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="209"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="210"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="211"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="212"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="213"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="214"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="215"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="216"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="217"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="218"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="219"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="220"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="221"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="222"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="223"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="224"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="225"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="226"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="227"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="228"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="229"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="230"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="231"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="232"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="233"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="234"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="235"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="236"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="237"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="238"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="239"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="240"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="241"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="242"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="243"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="244"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="245"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="246"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="247"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="248"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="249"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="250"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="251"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="252"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="253"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="254"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="255"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="256"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="257"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="258"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="259"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="260"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="261"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="262"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="263"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="264"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="265"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="266"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="267"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="268"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="269"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="270"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="271"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="272"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="273"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="274"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="275"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="276"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="277"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="278"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="279"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="280"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="281"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="282"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="283"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="284"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="285"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="286"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="287"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="288"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="289"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="290"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="291"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="292"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="293"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="294"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="295"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="296"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="297"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="298"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="299"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="300"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="301"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="302"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="303"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="304"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="305"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="306"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="307"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="308"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="309"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="310"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="311"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="312"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="313"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="314"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="315"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="316"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="317"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="318"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="319"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="320"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="321"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="322"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="323"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="324"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="325"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="326"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="327"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="328"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="329"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="330"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="331"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="332"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="333"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="334"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="335"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="336"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="337"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="338"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="339"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="340"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="341"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="342"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="343"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="344"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="345"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="346"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="347"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="348"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="349"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="350"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="351"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="352"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="353"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="354"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="355"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="356"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="357"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="358"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="359"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="360"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="361"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="362"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="363"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="364"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="365"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="366"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="367"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="368"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="369"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="370"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="371"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="372"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="373"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="374"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="375"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="376"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="377"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="378"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="379"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="380"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="381"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="382"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="383"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="384"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="385"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="386"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="387"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="388"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="389"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="390"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="391"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="392"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="393"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="394"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="395"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="396"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="397"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="398"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="399"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="400"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="401"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="402"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="403"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="404"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="405"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="406"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="407"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="408"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="409"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="410"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="411"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="412"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="413"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="414"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="415"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="416"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="417"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="418"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="419"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="420"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="421"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="422"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="423"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="424"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="425"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="426"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="427"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="428"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="429"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="430"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="431"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="432"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="433"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="434"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="435"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="436"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="437"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="438"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="439"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="440"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="441"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="442"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="443"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="444"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="445"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="446"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="447"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="448"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="449"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="450"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="451"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="452"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="453"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="454"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="455"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="456"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="457"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="458"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="459"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="460"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="461"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="462"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="463"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="464"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="465"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="466"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="467"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="468"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="469"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="470"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="471"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="472"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="473"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="474"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="475"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="476"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="477"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="478"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="479"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="480"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="481"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="482"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="483"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="484"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="485"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="486"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="487"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="488"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="489"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="490"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="491"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="492"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="493"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="494"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="495"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="496"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="497"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="498"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="499"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="500"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="501"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="502"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="503"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="504"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="505"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="506"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="507"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="508"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="509"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="510"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="511"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="512"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="513"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="514"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="515"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="516"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="517"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="518"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="519"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="520"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="521"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="522"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="523"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="524"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="525"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="526"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="527"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="528"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="529"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="530"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="531"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="532"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="533"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="534"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="535"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="536"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="537"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="538"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="539"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="540"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="541"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="542"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="543"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="544"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="545"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="546"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="547"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="548"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="549"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="550"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="551"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="552"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="553"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="554"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="555"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="556"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="557"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="558"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="559"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="560"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="561"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="562"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="563"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="564"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="565"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="566"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="567"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="568"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord nolabel" data-handle="N" data-i="569"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord" data-handle="N" data-i="570"><div class="label-wrapper"><span class="chord-label">𝄽</span><span class="bass-label"></span></div></div><div class="chord"></div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Controles -->
+<div id="controls">
+    <button id="playBtn">Play</button>
+    <button id="bpmDown">-</button>
+    <input type="number" id="bpmInput" value="120" min="30" max="300" />
+    <button id="bpmUp">+</button>
+    <span>BPM</span>
+
+    <button id="volumeBtn">Vol</button>
+    <div id="volumeControl">
+        <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="0.1" />
+    </div>
+
+    <button id="accentBtn">Accent Off</button>
+    <button id="timeSigBtn">4/4</button>
+</div>
+
+<script>
+// Variáveis
+let bpm = 120;
+let beatsPerBar = 4;
+let currentIndex = 0;
+let intervalId = null;
+let volume = 0.01;
+let accentOn = false;
+
+const playBtn = document.getElementById('playBtn');
+const bpmInput = document.getElementById('bpmInput');
+const bpmUp = document.getElementById('bpmUp');
+const bpmDown = document.getElementById('bpmDown');
+const chordsContainer = document.getElementById('chords');
+
+const volumeBtn = document.getElementById('volumeBtn');
+const volumeControl = document.getElementById('volumeControl');
+const volumeSlider = document.getElementById('volumeSlider');
+const accentBtn = document.getElementById('accentBtn');
+const timeSigBtn = document.getElementById('timeSigBtn');
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playClick(isDownbeat) {
+    const osc = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    osc.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    osc.type = 'square';
+    osc.frequency.value = isDownbeat && accentOn ? 1000 : 800;
+
+    gainNode.gain.value = volume;
+    osc.start();
+
+    setTimeout(() => {
+        gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
+        osc.stop(audioCtx.currentTime + 0.03);
+    }, 20);
+}
+
+function highlightChord(index) {
+    document.querySelectorAll('.chord').forEach(ch => ch.classList.remove('currentChord'));
+    const chord = document.querySelector(`.chord[data-i="${index}"]`);
+    if (chord) chord.classList.add('currentChord');
+}
+
+function tick() {
+    playClick(currentIndex % beatsPerBar === 0);
+    highlightChord(currentIndex);
+    currentIndex++;
+
+    const chordCount = document.querySelectorAll('.chord').length;
+    if (currentIndex >= chordCount) currentIndex = 0;
+}
+
+function startMetronome() {
+    if (intervalId) return;
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+
+    const intervalTime = 60000 / bpm;
+    tick();
+    intervalId = setInterval(tick, intervalTime);
+    playBtn.textContent = 'Stop';
+    playBtn.style.backgroundColor = '#dc3545';
+}
+
+function stopMetronome() {
+    clearInterval(intervalId);
+    intervalId = null;
+    playBtn.textContent = 'Play';
+    playBtn.style.backgroundColor = '#28a745';
+}
+
+function togglePlayPause() {
+    if (!intervalId) startMetronome();
+    else stopMetronome();
+}
+
+function updateBPM(newBpm) {
+    bpm = Math.max(30, Math.min(300, newBpm));
+    bpmInput.value = bpm;
+    if (intervalId) {
+        stopMetronome();
+        startMetronome();
+    }
+}
+
+// Eventos básicos
+playBtn.addEventListener('click', togglePlayPause);
+bpmInput.addEventListener('change', () => updateBPM(parseInt(bpmInput.value, 10)));
+bpmUp.addEventListener('click', () => updateBPM(bpm + 1));
+bpmDown.addEventListener('click', () => updateBPM(bpm - 1));
+
+volumeBtn.addEventListener('click', () => {
+    volumeControl.style.display = volumeControl.style.display === 'block' ? 'none' : 'block';
+});
+volumeSlider.addEventListener('input', (e) => {
+    volume = parseFloat(e.target.value);
+});
+
+accentBtn.addEventListener('click', () => {
+    accentOn = !accentOn;
+    accentBtn.textContent = accentOn ? 'Accent On' : 'Accent Off';
+});
+
+timeSigBtn.addEventListener('click', () => {
+    if (beatsPerBar === 4) {
+        beatsPerBar = 3;
+        chordsContainer.classList.remove('barlength-4');
+        chordsContainer.classList.add('barlength-3');
+        timeSigBtn.textContent = '3/4';
+    } else {
+        beatsPerBar = 4;
+        chordsContainer.classList.remove('barlength-3');
+        chordsContainer.classList.add('barlength-4');
+        timeSigBtn.textContent = '4/4';
+    }
+});
+
+// Tecla espaço = play/pause
+document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlayPause();
+    }
+});
+
+// Clique em acorde = tocar a partir dele
+document.querySelectorAll('.chord').forEach(chord => {
+    chord.addEventListener('click', () => {
+        const index = parseInt(chord.getAttribute('data-i'));
+        if (!isNaN(index)) {
+            currentIndex = index;
+            highlightChord(currentIndex);
+            if (intervalId) {
+                stopMetronome();
+                startMetronome();
+            }
+        }
+    });
+});
+</script>
+
+</body>
+</html>
